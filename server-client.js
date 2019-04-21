@@ -194,7 +194,7 @@ class ServerClient {
     delete this.app.connected[this.key]
   }
 
-  auth (credentials, nodeId) {
+  async auth (credentials, nodeId) {
     this.nodeId = nodeId
     let data = parseNodeId(nodeId)
     this.clientId = data.clientId
@@ -202,65 +202,64 @@ class ServerClient {
 
     if (nodeId === 'server' || data.userId === 'server') {
       this.app.reporter('unauthenticated', reportDetails(this))
-      return Promise.resolve(false)
+      return false
     }
 
     let start = Date.now()
-    return this.app.authenticator(this.userId, credentials, this)
-      .then(result => {
-        if (this.app.isBruteforce(this.remoteAddress)) {
-          return Promise.reject(new LoguxError('bruteforce'))
-        }
+    let result = await this.app.authenticator(this.userId, credentials, this)
 
-        if (result) {
-          let zombie = this.app.clientIds[this.clientId]
-          if (zombie) {
-            zombie.zombie = true
-            this.app.reporter('zombie', { nodeId: zombie.nodeId })
-            zombie.destroy()
-          }
-          this.app.clientIds[this.clientId] = this
-          this.app.nodeIds[this.nodeId] = this
-          if (this.userId) {
-            if (!this.app.userIds[this.userId]) {
-              this.app.userIds[this.userId] = []
-            }
-            this.app.userIds[this.userId].push(this)
-          }
-          this.app.emitter.emit('authenticated', this, Date.now() - start)
-          this.app.reporter('authenticated', reportDetails(this))
-        } else {
-          this.app.reporter('unauthenticated', reportDetails(this))
-          this.app.rememberBadAuth(this.remoteAddress)
+    if (this.app.isBruteforce(this.remoteAddress)) {
+      throw new LoguxError('bruteforce')
+    }
+
+    if (result) {
+      let zombie = this.app.clientIds[this.clientId]
+      if (zombie) {
+        zombie.zombie = true
+        this.app.reporter('zombie', { nodeId: zombie.nodeId })
+        zombie.destroy()
+      }
+      this.app.clientIds[this.clientId] = this
+      this.app.nodeIds[this.nodeId] = this
+      if (this.userId) {
+        if (!this.app.userIds[this.userId]) {
+          this.app.userIds[this.userId] = []
         }
-        return result
-      })
+        this.app.userIds[this.userId].push(this)
+      }
+      this.app.emitter.emit('authenticated', this, Date.now() - start)
+      this.app.reporter('authenticated', reportDetails(this))
+    } else {
+      this.app.reporter('unauthenticated', reportDetails(this))
+      this.app.rememberBadAuth(this.remoteAddress)
+    }
+    return result
   }
 
-  outMap (action, meta) {
-    return Promise.resolve([action, { id: meta.id, time: meta.time }])
+  async outMap (action, meta) {
+    return [action, { id: meta.id, time: meta.time }]
   }
 
-  inMap (action, meta) {
+  async inMap (action, meta) {
     if (!meta.subprotocol) {
       meta.subprotocol = this.node.remoteSubprotocol
     }
-    return Promise.resolve([action, meta])
+    return [action, meta]
   }
 
-  filter (action, meta) {
+  async filter (action, meta) {
     let ctx = this.app.createContext(meta)
 
     let wrongUser = !this.clientId || this.clientId !== ctx.clientId
     let wrongMeta = Object.keys(meta).some(i => ALLOWED_META.indexOf(i) === -1)
     if (wrongUser || wrongMeta) {
       this.app.denyAction(meta)
-      return Promise.resolve(false)
+      return false
     }
 
     let type = action.type
     if (type === 'logux/subscribe' || type === 'logux/unsubscribe') {
-      return Promise.resolve(true)
+      return true
     }
 
     let processor = this.app.types[type]
@@ -269,7 +268,7 @@ class ServerClient {
     }
     if (!processor) {
       this.app.internalUnkownType(action, meta)
-      return Promise.resolve(false)
+      return false
     }
 
     return forcePromise(() => processor.access(ctx, action, meta))

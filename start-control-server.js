@@ -37,7 +37,7 @@ function startControlServer (app) {
       req.on('data', chunk => {
         json += chunk
       })
-      req.on('end', () => {
+      req.on('end', async () => {
         let body
         try {
           body = JSON.parse(json)
@@ -67,9 +67,8 @@ function startControlServer (app) {
               return
             }
           }
-          Promise.all(body.commands.map(i => rule.command(i, req))).then(() => {
-            res.end()
-          })
+          await Promise.all(body.commands.map(i => rule.command(i, req)))
+          res.end()
         }
       })
     } else {
@@ -97,10 +96,11 @@ function startControlServer (app) {
     }
   })
 
-  app.unbind.push(() => {
-    return new Promise(resolve => {
-      httpServer.close(resolve)
-    })
+  app.unbind.push(async () => {
+    await httpServer.close()
+    // return new Promise(resolve => {
+    //   httpServer.close(resolve)
+    // })
   })
 
   return new Promise((resolve, reject) => {
